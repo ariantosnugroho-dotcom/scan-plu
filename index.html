@@ -4,6 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#15803d">
 <title>SCAN PLU - ITEM CHECKER</title>
 
 <script src="https://unpkg.com/html5-qrcode"></script>
@@ -13,7 +14,7 @@
 
 body {
   margin: 0;
-  padding: 18px;
+  padding: 16px;
   font-family: Arial, sans-serif;
   background: #f1f5f9;
   color: #1e293b;
@@ -32,6 +33,7 @@ header {
 header h1 {
   color: #15803d;
   margin-bottom: 5px;
+  font-size: 28px;
 }
 
 header p {
@@ -53,6 +55,10 @@ header p {
   border-radius: 10px;
 }
 
+#reader video {
+  object-fit: cover;
+}
+
 button {
   width: 100%;
   border: 0;
@@ -62,6 +68,11 @@ button {
   font-weight: bold;
   font-size: 15px;
   cursor: pointer;
+}
+
+button:disabled {
+  opacity: .5;
+  cursor: not-allowed;
 }
 
 .start {
@@ -95,6 +106,14 @@ input {
   color: white;
 }
 
+#loading {
+  display: none;
+  text-align: center;
+  padding: 15px;
+  color: #2563eb;
+  font-weight: bold;
+}
+
 #result {
   display: none;
   padding: 20px;
@@ -114,29 +133,36 @@ input {
   color: #991b1b;
 }
 
+.error {
+  background: #fef3c7;
+  border: 2px solid #d97706;
+  color: #92400e;
+}
+
 .status {
-  font-size: 26px;
+  font-size: 25px;
   font-weight: bold;
   margin-bottom: 15px;
 }
 
 .detail {
-  padding: 8px 0;
+  padding: 9px 0;
   border-bottom: 1px solid #00000020;
   font-size: 14px;
+  overflow-wrap: anywhere;
 }
 
 .desc {
-  font-size: 18px;
+  font-size: 20px;
   font-weight: bold;
-  margin: 14px 0;
+  margin: 16px 0;
 }
 
-#loading {
-  display: none;
+#cameraStatus {
+  font-size: 12px;
+  color: #64748b;
   text-align: center;
-  padding: 15px;
-  color: #2563eb;
+  margin-top: 10px;
 }
 
 .footer {
@@ -145,10 +171,12 @@ input {
   color: #94a3b8;
   padding: 15px;
 }
+
 </style>
 </head>
 
 <body>
+
 <div class="container">
 
 <header>
@@ -158,203 +186,541 @@ input {
 </header>
 
 <div class="card">
+
   <h3>📷 SCANNER BARCODE</h3>
+
   <div id="reader"></div>
 
-  <button class="start" onclick="startCamera()">
+  <button class="start" id="startBtn"
+    onclick="startCamera()">
     MULAI SCAN KAMERA
   </button>
 
-  <button class="stop" onclick="stopCamera()">
+  <button class="stop" id="stopBtn"
+    onclick="stopCamera()">
     STOP KAMERA
   </button>
+
+  <div id="cameraStatus">
+    Kamera belum aktif
+  </div>
+
 </div>
 
 <div class="card">
+
   <h3>⌨️ INPUT PLU / BARCODE</h3>
 
   <div class="input-row">
-    <input id="keyword"
+
+    <input
+      id="keyword"
       placeholder="Scan atau ketik kode..."
       autocomplete="off"
-      onkeydown="if(event.key==='Enter')checkItem()">
+      inputmode="numeric"
+      onkeydown="if(event.key==='Enter') checkItem()"
+    >
 
-    <button class="check" onclick="checkItem()">CEK</button>
+    <button class="check" onclick="checkItem()">
+      CEK
+    </button>
+
   </div>
+
 </div>
 
-<div id="loading">Mencari database MASTER...</div>
+<div id="loading">
+  ⏳ Mencari database MASTER...
+</div>
+
 <div id="result"></div>
 
 <div class="footer">
   SCAN PLU ITEM CHECKER
+  <br>
+  ALFAMART
 </div>
 
 </div>
 
 <script>
 
-// GANTI DENGAN URL WEB APP APPS SCRIPT KAMU
-const API_URL = 'https://script.google.com/a/macros/sat.co.id/s/AKfycbyH4xRT5SEZ9ZbN1Fdn184NsmAuDeK_YEvfSwz9RPMOL1NF6P9seh-CC2mhi0mNVPgpbw/exec';
+// ========================================
+// KONFIGURASI API APPS SCRIPT
+// ========================================
+
+const API_URL =
+'https://script.google.com/a/macros/sat.co.id/s/AKfycbyH4xRT5SEZ9ZbN1Fdn184NsmAuDeK_YEvfSwz9RPMOL1NF6P9seh-CC2mhi0mNVPgpbw/exec';
+
+
+// ========================================
+// VARIABEL
+// ========================================
 
 let scanner = null;
+let cameraRunning = false;
+let scanLocked = false;
+
 let lastCode = '';
 let lastTime = 0;
-let requestNumber = 0;
 
-function startCamera() {
-  if (scanner) return;
+let requestNumber = 0;
+let apiTimeout = null;
+
+
+// ========================================
+// MULAI KAMERA
+// ========================================
+
+async function startCamera() {
+
+  if (cameraRunning) return;
 
   if (typeof Html5Qrcode === 'undefined') {
     alert('Library scanner gagal dimuat. Periksa internet.');
     return;
   }
 
-  scanner = new Html5Qrcode('reader');
+  const status = document.getElementById('cameraStatus');
 
-  scanner.start(
-    { facingMode: 'environment' },
-    {
-      fps: 12,
-      qrbox: { width: 260, height: 140 },
-      formatsToSupport: [
-        Html5QrcodeSupportedFormats.EAN_13,
-        Html5QrcodeSupportedFormats.EAN_8,
-        Html5QrcodeSupportedFormats.UPC_A,
-        Html5QrcodeSupportedFormats.UPC_E,
-        Html5QrcodeSupportedFormats.CODE_128,
-        Html5QrcodeSupportedFormats.CODE_39,
-        Html5QrcodeSupportedFormats.ITF,
-        Html5QrcodeSupportedFormats.QR_CODE
-      ]
-    },
-    onScanSuccess,
-    () => {}
-  ).catch(error => {
+  status.textContent = 'Mengaktifkan kamera...';
+
+  try {
+
+    scanner = new Html5Qrcode('reader');
+
+    await scanner.start(
+
+      { facingMode: 'environment' },
+
+      {
+        fps: 15,
+
+        qrbox: function(width, height) {
+
+          const boxWidth = Math.min(width * 0.90, 360);
+
+          const boxHeight = Math.min(
+            height * 0.55,
+            200
+          );
+
+          return {
+            width: Math.floor(boxWidth),
+            height: Math.floor(boxHeight)
+          };
+
+        },
+
+        aspectRatio: 1.777,
+
+        formatsToSupport: [
+
+          Html5QrcodeSupportedFormats.EAN_13,
+          Html5QrcodeSupportedFormats.EAN_8,
+          Html5QrcodeSupportedFormats.UPC_A,
+          Html5QrcodeSupportedFormats.UPC_E,
+          Html5QrcodeSupportedFormats.CODE_128,
+          Html5QrcodeSupportedFormats.CODE_39,
+          Html5QrcodeSupportedFormats.ITF,
+          Html5QrcodeSupportedFormats.QR_CODE
+
+        ]
+
+      },
+
+      onScanSuccess,
+
+      function() {}
+
+    );
+
+    cameraRunning = true;
+    scanLocked = false;
+
+    status.textContent = '🟢 Kamera aktif - Arahkan barcode';
+
+    document.getElementById('startBtn').disabled = true;
+
+  } catch(error) {
+
     scanner = null;
-    alert('Kamera gagal dibuka: ' + error);
-  });
+    cameraRunning = false;
+
+    status.textContent = 'Kamera gagal diaktifkan';
+
+    alert(
+      'Kamera gagal dibuka.\n\n' +
+      error +
+      '\n\nPastikan menggunakan HTTPS dan izinkan akses kamera.'
+    );
+
+  }
+
 }
 
-function stopCamera() {
+
+// ========================================
+// STOP KAMERA
+// ========================================
+
+async function stopCamera() {
+
   if (!scanner) return;
 
   const current = scanner;
-  scanner = null;
 
-  current.stop()
-    .then(() => current.clear())
-    .catch(error => console.log(error));
+  scanner = null;
+  cameraRunning = false;
+  scanLocked = false;
+
+  try {
+
+    await current.stop();
+    current.clear();
+
+  } catch(error) {
+
+    console.log(error);
+
+  }
+
+  document.getElementById('startBtn').disabled = false;
+
+  document.getElementById('cameraStatus').textContent =
+    'Kamera berhenti';
+
 }
 
+
+// ========================================
+// HASIL SCAN BARCODE
+// ========================================
+
 function onScanSuccess(code) {
+
   const now = Date.now();
 
-  if (code === lastCode && now - lastTime < 2000) {
+  if (scanLocked) return;
+
+  if (
+    code === lastCode &&
+    now - lastTime < 2500
+  ) {
     return;
   }
 
   lastCode = code;
   lastTime = now;
 
+  scanLocked = true;
+
   document.getElementById('keyword').value = code;
-  lookup(code);
-}
 
-function checkItem() {
-  const code = document.getElementById('keyword').value.trim();
+  // Hentikan sementara proses scan
+  if (scanner && cameraRunning) {
 
-  if (!code) {
-    alert('Masukkan PLU atau barcode!');
-    return;
+    try {
+      scanner.pause(true);
+    } catch(error) {}
+
   }
 
-  lookup(code);
+  beep(true);
+
+  lookup(code, true);
+
 }
 
-function lookup(code) {
+
+// ========================================
+// INPUT MANUAL
+// ========================================
+
+function checkItem() {
+
+  const code = document
+    .getElementById('keyword')
+    .value
+    .trim();
+
+  if (!code) {
+
+    alert('Masukkan PLU atau barcode!');
+
+    return;
+
+  }
+
+  lookup(code, false);
+
+}
+
+
+// ========================================
+// PENCARIAN DATABASE MASTER
+// ========================================
+
+function lookup(code, fromScanner = false) {
+
   const currentRequest = ++requestNumber;
 
+  clearTimeout(apiTimeout);
+
   document.getElementById('loading').style.display = 'block';
+
   document.getElementById('result').style.display = 'none';
 
-  // JSONP: menghubungkan GitHub Pages dengan Apps Script
   const oldScript = document.getElementById('apiScript');
+
   if (oldScript) oldScript.remove();
 
-  window.handleApiResponse = function(data) {
-    if (currentRequest !== requestNumber) return;
+  function finish() {
+
+    clearTimeout(apiTimeout);
 
     document.getElementById('loading').style.display = 'none';
+
+    if (fromScanner) {
+
+      scanLocked = false;
+
+      if (scanner && cameraRunning) {
+
+        try {
+          scanner.resume();
+        } catch(error) {}
+
+      }
+
+    }
+
+  }
+
+
+  // CALLBACK JSONP
+
+  window.handleApiResponse = function(data) {
+
+    if (currentRequest !== requestNumber) return;
+
+    finish();
+
+    if (!data || typeof data.found !== 'boolean') {
+
+      showError('Format respons API tidak valid.');
+
+      return;
+
+    }
+
     showResult(data);
+
   };
+
+
+  // MEMBUAT REQUEST
 
   const script = document.createElement('script');
+
   script.id = 'apiScript';
-  script.src = API_URL + '?q=' + encodeURIComponent(code);
+
+  script.src =
+    API_URL + '?q=' + encodeURIComponent(code);
+
   script.onerror = function() {
+
     if (currentRequest !== requestNumber) return;
 
-    document.getElementById('loading').style.display = 'none';
-    alert('Gagal terhubung ke database MASTER.');
+    finish();
+
+    showError(
+      'Gagal terhubung ke database MASTER. Periksa koneksi internet atau akses Apps Script.'
+    );
+
     script.remove();
+
   };
 
+
+  // TIMEOUT 15 DETIK
+
+  apiTimeout = setTimeout(function() {
+
+    if (currentRequest !== requestNumber) return;
+
+    finish();
+
+    script.remove();
+
+    showError(
+      'Koneksi database terlalu lama. Silakan coba kembali.'
+    );
+
+  }, 15000);
+
+
   document.body.appendChild(script);
+
 }
 
+
+// ========================================
+// TAMPILKAN HASIL
+// ========================================
+
 function showResult(data) {
+
   const result = document.getElementById('result');
 
   result.style.display = 'block';
-  result.className = data.found ? 'active' : 'inactive';
 
   if (data.found) {
+
+    result.className = 'active';
+
     result.innerHTML = `
-      <div class="status">✓ PLU AKTIF</div>
-      <div class="detail"><b>PLU:</b> ${esc(data.plu)}</div>
-      <div class="detail"><b>BARCODE:</b> ${esc(data.barcode)}</div>
-      <div class="desc">${esc(data.desc)}</div>
-      <div class="detail"><b>CONV1:</b> ${esc(data.conv1)}</div>
-      <div class="detail"><b>CONV2:</b> ${esc(data.conv2)}</div>
+
+      <div class="status">
+        ✓ PLU AKTIF
+      </div>
+
+      <div class="detail">
+        <b>PLU:</b> ${esc(data.plu)}
+      </div>
+
+      <div class="detail">
+        <b>BARCODE:</b> ${esc(data.barcode)}
+      </div>
+
+      <div class="desc">
+        ${esc(data.desc)}
+      </div>
+
+      <div class="detail">
+        <b>CONV1:</b> ${esc(data.conv1)}
+      </div>
+
+      <div class="detail">
+        <b>CONV2:</b> ${esc(data.conv2)}
+      </div>
+
     `;
+
     beep(true);
+
   } else {
+
+    result.className = 'inactive';
+
     result.innerHTML = `
-      <div class="status">✕ PLU TIDAK AKTIF</div>
-      <div><b>KODE:</b> ${esc(data.keyword || '')}</div>
-      <p>${esc(data.message || 'Barang tidak ditemukan')}</p>
+
+      <div class="status">
+        ✕ PLU TIDAK AKTIF
+      </div>
+
+      <div>
+        <b>KODE:</b> ${esc(data.keyword || '')}
+      </div>
+
+      <p>
+        ${esc(data.message || 'Barang tidak ditemukan')}
+      </p>
+
     `;
+
     beep(false);
+
   }
+
 }
+
+
+// ========================================
+// TAMPILKAN ERROR
+// ========================================
+
+function showError(message) {
+
+  const result = document.getElementById('result');
+
+  result.style.display = 'block';
+
+  result.className = 'error';
+
+  result.innerHTML = `
+
+    <div class="status">
+      ⚠ KONEKSI ERROR
+    </div>
+
+    <p>${esc(message)}</p>
+
+  `;
+
+  beep(false);
+
+}
+
+
+// ========================================
+// PENGAMAN HTML
+// ========================================
 
 function esc(value) {
+
   return String(value ?? '').replace(/[&<>"']/g, c => ({
-    '&':'&amp;',
-    '<':'&lt;',
-    '>':'&gt;',
-    '"':'&quot;',
-    "'":'&#39;'
+
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+
   })[c]);
+
 }
 
+
+// ========================================
+// SUARA NOTIFIKASI
+// ========================================
+
 function beep(success) {
+
   try {
+
     const ctx = new AudioContext();
+
     const osc = ctx.createOscillator();
+
     const gain = ctx.createGain();
 
     osc.connect(gain);
+
     gain.connect(ctx.destination);
 
     osc.frequency.value = success ? 1100 : 300;
+
     gain.gain.value = 0.12;
 
     osc.start();
+
     osc.stop(ctx.currentTime + 0.2);
-  } catch(e) {}
+
+    osc.onended = function() {
+      ctx.close();
+    };
+
+  } catch(error) {
+
+    console.log(error);
+
+  }
+
 }
+
 </script>
+
 </body>
 </html>
